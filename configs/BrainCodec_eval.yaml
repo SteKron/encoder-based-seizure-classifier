@@ -1,0 +1,110 @@
+seed_everything: 42
+trainer:
+  accelerator: auto
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32
+  logger: false
+  fast_dev_run: false
+  max_epochs: -1
+  min_epochs: null
+  max_steps: -1
+  min_steps: null
+  max_time: null
+  limit_train_batches: null
+  limit_val_batches: 0
+  limit_test_batches: null
+  limit_predict_batches: null
+  overfit_batches: 0.0
+  val_check_interval: null
+  check_val_every_n_epoch: null
+  num_sanity_val_steps: 0
+  log_every_n_steps: 10
+  enable_checkpointing: null
+  enable_progress_bar: null
+  enable_model_summary: null
+  # accumulate_grad_batches: null
+  gradient_clip_val: null
+  gradient_clip_algorithm: null
+  deterministic: false
+  benchmark: null
+  inference_mode: true
+  use_distributed_sampler: true
+  detect_anomaly: false
+  barebones: false
+  sync_batchnorm: true
+  reload_dataloaders_every_n_epochs: 0
+  default_root_dir: null
+model:
+  class_path: models.braincodec.BrainCodec
+  init_args:
+    lr: 
+      g: 1e-5
+      d: 1e-7
+    training_steps: 96000
+    warmup: 4000
+    accumulate_grad_batches: 1
+    use_balancer: true
+    train_discriminator: true
+    load_model: <checkpoint>
+    model:
+      class_path: models.encodec.Encodec
+      init_args:
+        encoder: 
+          class_path: models.encodec.SEANetEncoder
+          init_args:
+            n_filters: 16
+            max_filters: 256
+            dimension: 64
+            kernel_size: 3
+            last_kernel_size: 3
+            causal: false
+            ratios: [2, 2, 2, 2, 2, 2]
+            lstm: 0
+            norm: "none"
+            true_skip: True
+        decoder: 
+          class_path: models.encodec.SEANetDecoder
+          init_args:
+            n_filters: 16
+            max_filters: 256
+            dimension: 64
+            kernel_size: 3
+            last_kernel_size: 3
+            causal: false
+            ratios: [2, 2, 2, 2, 2, 2]
+            lstm: 0
+            norm: "none"
+            true_skip: True
+        sample_rate: 512
+        segment: 4
+        overlap: 0
+    quantizer:
+      class_path: vector_quantize_pytorch.ResidualVQ
+      init_args:
+        dim: 64
+        num_quantizers: 4
+        codebook_size: 256
+        decay: 0.99
+        kmeans_init: true
+        kmeans_iters: 800
+        rotation_trick: false
+        learnable_codebook: false
+        use_cosine_sim: false
+        channel_last: false
+        commitment_weight: 1000
+        threshold_ema_dead_code: 2
+data:
+  class_path: datasets.bids.BIDSEEGData
+  init_args:
+    folders: 
+      - <dataset_folder>
+    train_patients:
+      - [""]
+    test_patients:
+      - ["<pat>"]
+    batch_size: 16
+    segment_size: 4000
+    stride: 1000
+    num_workers: 1
