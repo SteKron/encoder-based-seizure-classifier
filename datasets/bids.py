@@ -214,7 +214,7 @@ class BIDSEEGDataset(Dataset[EEGBatch]):
 
         return self._sampling_rates
 
-    def __getitem__(self, n: int) -> Tuple[Tensor, Tensor, Tensor, int, int, float, float, int]:
+    def __getitem__(self, n: int) -> EEGBatch:
         dataset = self.dataset_id[n]
         patient = self.patient_id[n]
         session = self.session_id[n]
@@ -243,13 +243,18 @@ class BIDSEEGDataset(Dataset[EEGBatch]):
             )
         ]
 
-        # TODO: Turn mask at 0.25Hz into mask at 1Hz; 
-        # if one window is masked for more than 50%, mask the whole window
-        if np.sum(mask) > (0.5 * self.window * _SAMPLING_RATE):
-            mask = np.array([1])
-        else:
-            mask = np.array([0])
-        torch.from_numpy(mask)
+        # Convert to 4 labels (1Hz labeling)
+        labels_per_second = []
+        segment_length = _SAMPLING_RATE  # 1-second segment
+
+        for i in range(4):  # Process 4 seconds separately
+            segment = mask[i * segment_length : (i + 1) * segment_length]
+            if np.sum(segment) > 0.5 * segment_length:
+                labels_per_second.append(1)
+            else:
+                labels_per_second.append(0)
+
+        mask = torch.tensor(labels_per_second)
 
         sample_torch = torch.from_numpy(sample)
         downsampled_seizure = interpolate(

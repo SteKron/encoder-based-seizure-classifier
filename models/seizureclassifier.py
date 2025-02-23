@@ -36,7 +36,7 @@ class SpatialFusionBlock(nn.Module):
 
 class LinearClassifier(nn.Module):
     
-    def __init__(self, input_dim, output_dim=1):
+    def __init__(self, input_dim, output_dim):
         super().__init__()
         self.fc = nn.Linear(input_dim, output_dim)
 
@@ -79,7 +79,7 @@ class SeizureClassifier(pl.LightningModule):
         )
 
         # Linear classifier
-        self.classifier = LinearClassifier(input_dim=num_embeddings, output_dim=1)
+        self.classifier = LinearClassifier(input_dim=num_embeddings, output_dim=4)
         
         self.lr = lr
         self.criterion = nn.BCEWithLogitsLoss()
