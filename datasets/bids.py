@@ -127,6 +127,7 @@ class BIDSEEGData(EEGDataset):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=True,
+            shuffle=True,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -191,6 +192,13 @@ class BIDSEEGDataset(Dataset[EEGBatch]):
                 )
                 for pf in patient_files:
                     dataset[Path(pf).name] = read_edf(pf)
+                
+                # Extract seizure events from tsv files
+                patient_files_evt = self.layouts[idx].get(
+                    subject=self.n_patient[idx], suffix="events", extension="tsv", return_type="files"
+                )
+                for ef in patient_files_evt:
+                    dataset[Path(ef).name] = self.seizure_mask(pd.read_csv(ef, sep="\t"))
 
         return self._datasets
 
@@ -206,7 +214,7 @@ class BIDSEEGDataset(Dataset[EEGBatch]):
 
         return self._sampling_rates
 
-    def __getitem__(self, n: int) -> Tuple[Tensor, Tensor, int, int, float, float, int]:
+    def __getitem__(self, n: int) -> Tuple[Tensor, Tensor, Tensor, int, int, float, float, int]:
         dataset = self.dataset_id[n]
         patient = self.patient_id[n]
         session = self.session_id[n]
@@ -214,10 +222,12 @@ class BIDSEEGDataset(Dataset[EEGBatch]):
         mapped = self.map_id[n]
 
         edf_filename = f"sub-{str(patient).zfill(2)}_ses-{str(session).zfill(2)}_task-szMonitoring_run-{str(run).zfill(2)}_eeg.edf"
-
+        tsv_filename = f"sub-{str(patient).zfill(2)}_ses-{str(session).zfill(2)}_task-szMonitoring_run-{str(run).zfill(2)}_events.tsv"
+  
         srate = self.sampling_rates[dataset][edf_filename]
 
         patient_dataset = self.datasets[dataset][edf_filename]
+        patient_seizures = self.datasets[dataset][tsv_filename]
 
         sample = patient_dataset[
             :,
@@ -225,13 +235,29 @@ class BIDSEEGDataset(Dataset[EEGBatch]):
                 mapped * self.stride * srate + self.window * srate
             ),
         ]
+
+        # Use _SAMPLING_RATE, so there is no need to upsample the mask
+        mask = patient_seizures[
+            int(mapped * self.stride * _SAMPLING_RATE) : int(
+                mapped * self.stride * _SAMPLING_RATE + self.window * _SAMPLING_RATE
+            )
+        ]
+
+        # TODO: Turn mask at 0.25Hz into mask at 1Hz; 
+        # if one window is masked for more than 50%, mask the whole window
+        if np.sum(mask) > (0.5 * self.window * _SAMPLING_RATE):
+            mask = np.array([1])
+        else:
+            mask = np.array([0])
+        torch.from_numpy(mask)
+
         sample_torch = torch.from_numpy(sample)
         downsampled_seizure = interpolate(
             sample_torch.unsqueeze(0), size=self.window_samples, mode="linear"
         )
         sample = downsampled_seizure.squeeze(0)
 
-        return EEGBatch(sample, n, mapped, patient, dataset)
+        return EEGBatch(sample, mask, n, mapped, patient, dataset)
 
     def map_items(self) -> None:
         dataset_id = [np.empty((0,), dtype=int)]
@@ -258,6 +284,22 @@ class BIDSEEGDataset(Dataset[EEGBatch]):
         self.session_id = np.concatenate(session_id)
         self.run_id = np.concatenate(run_id)
         self.map_id = np.concatenate(map_id)
+
+    def seizure_mask(self, events) -> np.ndarray:
+        # Use _SAMPLING_RATE, so there is no need to upsample the mask
+        # This would of course need to be changed when working with multiple datasets
+
+        mask = np.zeros(int(events["recordingDuration"].values[0]) * _SAMPLING_RATE)
+
+        if 'sz' in events['eventType'].values:
+            seizure_events = events[events['eventType'] == 'sz'] 
+            for idx, seizure in seizure_events.iterrows(): 
+                mask[
+                    int(seizure["onset"] * _SAMPLING_RATE) : int((seizure["onset"] + seizure["duration"]) * _SAMPLING_RATE)
+                ] = 1
+            assert np.sum(mask) == seizure_events["duration"].sum() * _SAMPLING_RATE
+            
+        return mask
 
     def __len__(self) -> int:
         total_len = len(self.dataset_id)
